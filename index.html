@@ -2,7 +2,7 @@
 <html lang="ja"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>小柳 配信ログ</title>
+<title>配信ログ</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" href="icon-192.png">
@@ -242,7 +242,7 @@ code.sample{display:block;font-family:ui-monospace,monospace;font-size:12px;back
 <div class="wrap">
   <header class="top">
     <div class="brand">
-      <h1>小柳 配信ログ <span class="tag">STREAM LOG</span></h1>
+      <h1><span id="appName">配信ログ</span> <span class="tag">STREAM LOG</span></h1>
       <p>配信の時間帯・内容・コラボ相手と、歌ってみた・ライブ出演の記録（Googleスプレッドシートに保存・PC／スマホ共通）</p>
     </div>
     <div class="actions"><button class="btn ghost" id="cfgBtn" type="button">接続設定</button></div>
@@ -458,6 +458,7 @@ code.sample{display:block;font-family:ui-monospace,monospace;font-size:12px;back
     <p class="hint">記録を保存するGoogleスプレッドシート（GAS）とつなぎます。端末ごと（PC・スマホのホーム画面アプリ）に一度だけ入力してください。</p>
     <label class="f">GASのウェブアプリURL<input type="url" id="cfg_url" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off"></label>
     <label class="f">合言葉<input type="password" id="cfg_key" autocomplete="off" placeholder="GASのスクリプトプロパティに設定したもの"></label>
+    <label class="f">配信者の名前（全端末共通・空欄なら「配信ログ」と表示）<input type="text" id="cfg_name" autocomplete="off" placeholder="このログで記録する配信者"></label>
     <p class="err" id="cfg_err"></p>
     <div class="dlg-actions">
       <button class="btn" type="button" data-close>閉じる</button>
@@ -476,7 +477,7 @@ code.sample{display:block;font-family:ui-monospace,monospace;font-size:12px;back
     <label class="f">読み込み方<select id="importMode"><option value="merge">今の記録に足す（同じ記録は読み込んだ方で上書き）</option><option value="replace">今の記録を消して入れ替える</option></select></label>
     <label class="f" id="replaceOkWrap" hidden style="display:flex;gap:6px;align-items:center;color:var(--now)"><input type="checkbox" id="replaceOk" style="width:auto">今の記録が消えることを確認しました</label>
     <div class="thumbbtns"><label class="btn" for="importFile">ファイルを選ぶ</label><input type="file" id="importFile" accept=".json,application/json" hidden></div>
-    <label class="f">または、コピーしたデータを貼り付け<textarea id="importText" rows="4" placeholder='{"app":"koyanagi-stream-log", ...}'></textarea></label>
+    <label class="f">または、コピーしたデータを貼り付け<textarea id="importText" rows="4" placeholder='{"app":"stream-log", ...}'></textarea></label>
     <div class="thumbbtns"><button class="btn" type="button" id="importTextBtn">貼り付けたデータを読み込む</button></div>
     <p class="err" id="imp_err"></p>
     <div class="dlg-actions"><button class="btn" type="button" data-close>閉じる</button></div>
@@ -485,6 +486,7 @@ code.sample{display:block;font-family:ui-monospace,monospace;font-size:12px;back
 
 <script>
 (() => {
+const NS='sl:'+location.pathname.replace(/[^/]*$/,'')+':'; // 同じ github.io に複数置いても設定が混ざらないよう、置き場所ごとに分ける
 const CATS=[{id:'talk',label:'雑談'},{id:'game',label:'ゲーム'},{id:'song',label:'歌枠'},{id:'plan',label:'企画'},{id:'other',label:'その他'}];
 const TYPES=[{id:'cover',label:'歌ってみた',short:'歌みた'},{id:'original',label:'オリジナル曲',short:'オリ曲'},{id:'live',label:'ライブ出演',short:'LIVE'},{id:'event',label:'イベント・メディア',short:'出演'}];
 const catOf=id=>CATS.find(c=>c.id===id)||CATS[4];
@@ -515,7 +517,7 @@ let monthCur=new Date(new Date().getFullYear(),new Date().getMonth(),1);
 const ytId=u=>{const m=/(?:youtube\.com\/(?:watch\?(?:.*&)?v=|live\/|shorts\/|embed\/)|youtu\.be\/)([\w-]{11})/.exec(u||'');return m?m[1]:''};
 const ytThumb=u=>{const id=ytId(u);return id?`https://i.ytimg.com/vi/${id}/mqdefault.jpg`:''};
 const thumbSrc=s=>s&&(s.thumb||ytThumb(s.url))||'';
-try{const t=localStorage.getItem('kl-tab');if(t)tab=t}catch(e){}
+try{const t=localStorage.getItem(NS+'tab');if(t)tab=t}catch(e){}
 
 function toast(msg){const t=document.createElement('div');t.className='toast';t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),2600)}
 
@@ -529,7 +531,7 @@ $('#typeFilter').innerHTML+=TYPES.map(t=>`<option value="${t.id}">${t.label}</op
 $('#hourLab').innerHTML=Array.from({length:24},(_,h)=>`<span>${h%3===0?h:''}</span>`).join('');
 
 function setTab(t){
-  tab=t;try{localStorage.setItem('kl-tab',t)}catch(e){}
+  tab=t;try{localStorage.setItem(NS+'tab',t)}catch(e){}
   document.querySelectorAll('nav.tabs button').forEach(b=>b.setAttribute('aria-selected',b.dataset.tab===t));
   for(const v of ['month','week','list','works','bank'])$('#view-'+v).hidden=v!==t;
 }
@@ -938,7 +940,7 @@ function errMsg(e){
   if(c==='net')return '通信できませんでした。電波の状態を確認して、もう一度試してください。';
   if(c==='auth')return '合言葉が違います。「接続設定」を確認してください。';
   if(c==='nocfg')return '先に「接続設定」をしてください。';
-  if(c==='server'&&e.detail&&/^\[小柳ログ\]/.test(e.detail))return e.detail.replace(/^\[小柳ログ\]\s*/,'');
+  if(c==='server'&&e.detail&&/^\[配信ログ\]/.test(e.detail))return e.detail.replace(/^\[配信ログ\]\s*/,'');
   return '保存できませんでした。通信状態を確認して、もう一度試してください。';
 }
 function setWritable(w){
@@ -950,15 +952,17 @@ function setWritable(w){
 setTab(tab);renderAll();
 setInterval(()=>{if(tab==='week')renderWeek()},60000);
 // ---------- Googleスプレッドシートに保存（PC・スマホ共通） ----------
-let store={streams:[],works:[],bank:null},loadedOnce=false;
+let store={streams:[],works:[],bank:null,profile:null},loadedOnce=false;
+const profName=()=>String(store.profile&&store.profile.name||'').trim();
+function renderName(){const n=profName(),t=n?`${n} 配信ログ`:'配信ログ';$('#appName').textContent=t;document.title=t}
 function newId(){return Date.now().toString(36)+Math.random().toString(36).slice(2,8)}
 function syncVars(){streams=store.streams;works=store.works;bank=store.bank||null}
 function updateStatus(msg){
   $('#syncStatus').textContent=msg||`配信 ${streams.length}件・歌みた／ライブ ${works.length}件（Googleスプレッドシートに保存・PCとスマホで共有）`;
-  let lb=null;try{const v=localStorage.getItem('kl-lastcopy');if(v)lb=new Date(+v)}catch(e){}
+  let lb=null;try{const v=localStorage.getItem(NS+'lastcopy');if(v)lb=new Date(+v)}catch(e){}
   $('#bkInfo').textContent=lb?`この端末での前回の控え：${lb.getFullYear()}/${lb.getMonth()+1}/${lb.getDate()} ${pad(lb.getHours())}:${pad(lb.getMinutes())}`:'';
 }
-const CFG_KEY='kl-server';
+const CFG_KEY=NS+'server';
 function getCfg(){try{const o=JSON.parse(localStorage.getItem(CFG_KEY)||'null');return o&&o.url&&o.key?o:null}catch(e){return null}}
 function setCfg(o){localStorage.setItem(CFG_KEY,JSON.stringify(o))}
 async function call(cfg,fn,args){
@@ -970,7 +974,7 @@ async function call(cfg,fn,args){
   return j.data;
 }
 const run=(fn,...args)=>{const cfg=getCfg();if(!cfg){const err=new Error('nocfg');err.code='nocfg';return Promise.reject(err)}return call(cfg,fn,args)};
-function apply(d){if(!d)return;setWritable(true);store={streams:d.streams||[],works:d.works||[],bank:d.bank||null};loadedOnce=true;syncVars();renderAll();updateStatus()}
+function apply(d){if(!d)return;setWritable(true);store={streams:d.streams||[],works:d.works||[],bank:d.bank||null,profile:d.profile||null};renderName();loadedOnce=true;syncVars();renderAll();updateStatus()}
 let refreshing=false;
 async function refresh(){
   if(refreshing)return;refreshing=true;
@@ -993,7 +997,7 @@ setWritable(!!getCfg());
 updateStatus('記録を読み込んでいます…');
 refresh();
 // 接続設定
-function openCfg(){const c=getCfg()||{};$('#cfg_url').value=c.url||'';$('#cfg_key').value=c.key||'';$('#cfg_err').textContent='';$('#cfgDlg').showModal()}
+function openCfg(){const c=getCfg()||{};$('#cfg_url').value=c.url||'';$('#cfg_key').value=c.key||'';$('#cfg_name').value=profName();$('#cfg_err').textContent='';$('#cfgDlg').showModal()}
 $('#cfgBtn').onclick=openCfg;
 if(!getCfg())setTimeout(openCfg,300);
 $('#cfgForm').addEventListener('submit',async e=>{
@@ -1002,8 +1006,14 @@ $('#cfgForm').addEventListener('submit',async e=>{
   if(!/^https:\/\/script\.google(usercontent)?\.com\/.+/.test(url)){$('#cfg_err').textContent='GASのウェブアプリURL（https://script.google.com/macros/s/…/exec）を入れてください。';return}
   if(!key){$('#cfg_err').textContent='合言葉を入れてください。';return}
   const btn=$('#cfg_save');btn.disabled=true;$('#cfg_err').textContent='接続を確認しています…';
-  try{const d=await call({url,key},'getAll',[]);try{setCfg({url,key})}catch(_){$('#cfg_err').textContent='この端末に設定を保存できませんでした。';return}apply(d);$('#cfgDlg').close();toast('接続しました')}
-  catch(err){$('#cfg_err').textContent=err.code==='auth'?'合言葉が違います。':err.code==='server'&&err.detail?err.detail.replace(/^\[小柳ログ\]\s*/,''):'つながりませんでした。URLと、GASのデプロイ設定（アクセスできるユーザー：全員）を確認してください。'}
+  try{
+    let d=await call({url,key},'getAll',[]);
+    try{setCfg({url,key})}catch(_){$('#cfg_err').textContent='この端末に設定を保存できませんでした。';return}
+    const name=$('#cfg_name').value.trim(),cur=String(d.profile&&d.profile.name||'').trim();
+    if(name!==cur)d=await call({url,key},'saveProfile',[{...(d.profile||{}),name}]);
+    apply(d);$('#cfgDlg').close();toast('保存しました');
+  }
+  catch(err){$('#cfg_err').textContent=err.code==='auth'?'合言葉が違います。':err.code==='server'&&err.detail?err.detail.replace(/^\[配信ログ\]\s*/,''):'つながりませんでした。URLと、GASのデプロイ設定（アクセスできるユーザー：全員）を確認してください。'}
   finally{btn.disabled=false}
 });
 // 別の端末で入力した分を取り込む：画面に戻ったときと、1分ごと
@@ -1017,15 +1027,15 @@ function fileToThumb(f){return new Promise((res,rej)=>{
 
 // ---------- バックアップ ----------
 $('#backupBtn').onclick=()=>{$('#imp_err').textContent='';updateStatus();$('#backupDlg').showModal()};
-const exportData=()=>({app:'koyanagi-stream-log',version:1,exportedAt:new Date().toISOString(),streams:store.streams,works:store.works,bank:store.bank});
+const exportData=()=>({app:'stream-log',version:1,exportedAt:new Date().toISOString(),profile:store.profile||null,streams:store.streams,works:store.works,bank:store.bank});
 $('#exportBtn').onclick=()=>{
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(exportData(),null,1)],{type:'application/json'}));
-  a.download=`小柳配信ログ_${ymd(new Date())}.json`;document.body.appendChild(a);a.click();
+  a.download=`${profName()}配信ログ_${ymd(new Date())}.json`;document.body.appendChild(a);a.click();
   setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1500);
-  try{localStorage.setItem('kl-lastcopy',String(Date.now()))}catch(e){}updateStatus();toast('書き出しました');
+  try{localStorage.setItem(NS+'lastcopy',String(Date.now()))}catch(e){}updateStatus();toast('書き出しました');
 };
 $('#copyBtn').onclick=async()=>{
-  try{await navigator.clipboard.writeText(JSON.stringify(exportData()));try{localStorage.setItem('kl-lastcopy',String(Date.now()))}catch(e){}updateStatus();toast('データをコピーしました')}
+  try{await navigator.clipboard.writeText(JSON.stringify(exportData()));try{localStorage.setItem(NS+'lastcopy',String(Date.now()))}catch(e){}updateStatus();toast('データをコピーしました')}
   catch(e){$('#imp_err').textContent='コピーできませんでした。'}
 };
 $('#importMode').addEventListener('input',()=>{$('#replaceOkWrap').hidden=$('#importMode').value!=='replace';$('#replaceOk').checked=false});
@@ -1045,7 +1055,7 @@ async function importJson(text,badMsg){
   if(mode==='replace'&&!$('#replaceOk').checked){errEl.textContent=`入れ替えると今の記録（配信${streams.length}件・歌みた／ライブ${works.length}件）が消えます。上の確認にチェックを入れてから、もう一度読み込んでください。`;return}
   errEl.textContent='取り込み中…';let n=0;
   try{
-    apply(await run('importAll',{streams:inS,works:inW,bank:d.bank||null},mode));n=inS.length+inW.length;
+    apply(await run('importAll',{streams:inS,works:inW,bank:d.bank||null,profile:d.profile||null},mode));n=inS.length+inW.length;
     errEl.textContent='';
     $('#importText').value='';$('#backupDlg').close();toast(`配信${inS.length}件・歌みた／ライブ${inW.length}件を読み込みました`);
   }catch(err){errEl.textContent=`${n}件まで取り込みました。${errMsg(err)}`}
