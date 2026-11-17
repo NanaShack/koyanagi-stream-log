@@ -261,6 +261,7 @@ code.sample{display:block;font-family:ui-monospace,monospace;font-size:12px;back
     <button role="tab" data-tab="week" aria-selected="false">週間タイムライン</button>
     <button role="tab" data-tab="list" aria-selected="false">配信一覧</button>
     <button role="tab" data-tab="works" aria-selected="false">歌みた・ライブ</button>
+    <button role="tab" data-tab="events" aria-selected="false">イベント</button>
     <button role="tab" data-tab="bank" aria-selected="false">配信貯金</button>
   </nav>
 
@@ -316,6 +317,21 @@ code.sample{display:block;font-family:ui-monospace,monospace;font-size:12px;back
     </div>
     <div class="status" id="listCount"></div>
     <div class="panel rows" id="streamRows"></div>
+  </section>
+
+  <section id="view-events" hidden style="display:grid;gap:12px">
+    <div class="panel card">
+      <h3>記録をイベントにまとめる<small>タイトル・メモにキーワードを含む記録に、イベント名をまとめて付けます（イベント未設定の記録だけ）</small></h3>
+      <form id="evTagForm" novalidate>
+        <div class="fgrid">
+          <label class="f">イベント名<input type="text" id="ev_name" list="eventList" placeholder="例：にじさんじ甲子園2026"></label>
+          <label class="f">キーワード<input type="text" id="ev_kw" placeholder="例：にじ甲"></label>
+          <div class="dlg-actions" style="align-self:end"><button class="btn primary" type="submit" id="ev_apply">まとめる</button></div>
+        </div>
+        <p class="err" id="ev_err"></p>
+      </form>
+    </div>
+    <div id="eventCards" style="display:grid;gap:14px"></div>
   </section>
 
   <section id="view-works" hidden style="display:grid;gap:12px">
@@ -405,9 +421,11 @@ code.sample{display:block;font-family:ui-monospace,monospace;font-size:12px;back
           <p class="hint">画像を選ばなくても、YouTube のURLを入れるとそのサムネを表示します（ネット接続時）。</p>
         </div>
       </div>
+      <label class="f full">イベント（任意）<input type="text" id="s_event" list="eventList" placeholder="例：にじさんじ甲子園2026（同じイベントの配信をまとめて見られます）"></label>
       <label class="f full">メモ<textarea id="s_note" placeholder="遊んだゲーム名、企画内容、印象に残った話など"></textarea></label>
     </div>
     <datalist id="gameList"></datalist>
+    <datalist id="eventList"></datalist>
     <p class="hint">開始時刻と総配信時間を入れると、終了時刻を自動で計算して入れます。総配信時間は YouTube の表示どおり「5:53:33」（時:分:秒）、「5:53」（時:分）、分だけの「354」のどれでも入れられます。時刻がわからないときは空欄のまま保存でき、タイムラインの日付の上に「時刻?」と出ます。</p>
     <p class="err" id="s_err"></p>
     <div class="dlg-actions">
@@ -428,6 +446,7 @@ code.sample{display:block;font-family:ui-monospace,monospace;font-size:12px;back
       <label class="f full">タイトル・曲名・公演名<input type="text" id="w_title"></label>
       <label class="f full">共演・参加メンバー<input type="text" id="w_with" placeholder="読点・カンマ区切り"></label>
       <label class="f full">URL<input type="url" id="w_url" placeholder="https://"></label>
+      <label class="f full">イベント（任意）<input type="text" id="w_event" list="eventList" placeholder="例：にじさんじ甲子園2026"></label>
       <label class="f full">メモ<textarea id="w_note" placeholder="原曲、MIX・イラスト担当、セットリストなど"></textarea></label>
     </div>
     <p class="err" id="w_err"></p>
@@ -540,7 +559,7 @@ $('#hourLab').innerHTML=Array.from({length:24},(_,h)=>`<span>${h%3===0?h:''}</sp
 function setTab(t){
   tab=t;try{localStorage.setItem(NS+'tab',t)}catch(e){}
   document.querySelectorAll('nav.tabs button').forEach(b=>b.setAttribute('aria-selected',b.dataset.tab===t));
-  for(const v of ['month','week','list','works','bank'])$('#view-'+v).hidden=v!==t;
+  for(const v of ['month','week','list','works','events','bank'])$('#view-'+v).hidden=v!==t;
 }
 document.querySelectorAll('nav.tabs button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
 
@@ -690,7 +709,7 @@ function renderList(){
     if(cf&&s.category!==cf)return false;
     const n=splitNames(s.collab).length;
     if(co==='solo'&&n)return false;if(co==='collab'&&!n)return false;
-    if(q&&!`${s.title} ${s.game||''} ${s.collab} ${s.note}`.toLowerCase().includes(q))return false;
+    if(q&&!BRK(`${s.title} ${s.game||''} ${s.collab} ${s.note} ${s.event||''}`).toLowerCase().includes(q))return false;
     return true;
   }).sort((a,b)=>(b.date+(b.start||'')).localeCompare(a.date+(a.start||'')));
   const tot=rows.reduce((a,s)=>a+durOf(s),0);
@@ -807,7 +826,54 @@ $('#bkLedger').addEventListener('click',e=>{
   saveBank({entries:(cfg().entries||[]).filter(x=>x.id!==b.dataset.delentry)}).then(()=>toast('削除しました')).catch(()=>{});
 });
 
-function renderAll(){renderMonth();renderWeek();renderInsights();renderList();renderWorks();renderBank()}
+// ---------- イベント（同じイベントの配信・出演をまとめる） ----------
+const evMeta=()=>{try{return (store&&store.events)||{}}catch(e){return {}}}; // 起動直後はまだ読み込み前
+function eventNames(){const s=new Set();for(const x of streams)if(x.event)s.add(x.event);for(const x of works)if(x.event)s.add(x.event);for(const k of Object.keys(evMeta()))s.add(k);return [...s]}
+function renderEvents(){
+  const names=eventNames();
+  $('#eventList').innerHTML=names.map(n=>`<option value="${esc(n)}">`).join('');
+  const ae=document.activeElement;if(ae&&ae.classList&&ae.classList.contains('ev-memo'))return; // 入力中は描き直さない
+  const cards=names.map(n=>{
+    const ss=streams.filter(x=>x.event===n&&valid(x)),ww=works.filter(x=>x.event===n&&parseYmd(x.date));
+    const items=[...ss.map(o=>({k:'s',d:o.date,t:o.start||'',o})),...ww.map(o=>({k:'w',d:o.date,t:o.time||'',o}))].sort((a,b)=>(a.d+a.t).localeCompare(b.d+b.t));
+    const ds=items.map(i=>i.d);
+    return {n,items,ss,ww,first:ds[0]||'',last:ds[ds.length-1]||'',tot:ss.reduce((a,o)=>a+durOf(o),0)};
+  }).sort((a,b)=>b.last.localeCompare(a.last)||a.n.localeCompare(b.n,'ja'));
+  $('#eventCards').innerHTML=cards.length?cards.map(c=>{
+    const memo=(evMeta()[c.n]||{}).memo||'';
+    const rows=c.items.map(i=>{const d=parseYmd(i.d);
+      if(i.k==='s'){const s=i.o,cat=catOf(s.category);return `<button type="button" class="row" data-stream="${esc(s.id)}"><span class="date">${s.date.replace(/-/g,'.')}<small>${WD[d.getDay()]}</small></span><span class="time">${esc(timeLabel(s))}・${durLabel(s)}</span><span class="title">${esc(s.title||cat.label)}${splitNames(s.collab).length?`<span class="sub">with ${esc(splitNames(s.collab).join('、'))}</span>`:''}</span><span class="chip" style="--c:var(--c-${cat.id})">配信・${cat.label}</span></button>`}
+      const w=i.o,t=typeOf(w.type),col=w.type==='cover'?'song':w.type==='original'?'other':w.type==='dance'?'game':w.type==='live'?'plan':'talk';
+      return `<button type="button" class="row" data-work="${esc(w.id)}"><span class="date">${w.date.replace(/-/g,'.')}<small>${WD[d.getDay()]}</small></span><span class="time">${esc(w.time||'')}</span><span class="title">${esc(w.title||t.label)}${splitNames(w.with).length?`<span class="sub">with ${esc(splitNames(w.with).join('、'))}</span>`:''}</span><span class="chip" style="--c:var(--c-${col})">${t.label}</span></button>`}).join('');
+    return `<div class="panel card"><h3>${esc(c.n)}<small>${c.first?`${c.first.replace(/-/g,'.')} – ${c.last.replace(/-/g,'.')}`:'記録なし'}</small></h3>
+      <div class="summary" style="padding:0"><div><span class="k">配信</span><span class="v">${c.ss.length}<small>回</small></span></div><div><span class="k">合計配信時間</span><span class="v">${Math.floor(c.tot/60)}<small>時間</small>${pad(c.tot%60)}<small>分</small></span></div><div><span class="k">歌みた・出演</span><span class="v">${c.ww.length}<small>件</small></span></div></div>
+      <label class="f">まとめメモ（結果・名場面など。入力して枠の外を押すと保存）<textarea class="ev-memo" data-event="${esc(c.n)}" rows="5" ${canWrite?'':'disabled'}>${esc(memo)}</textarea></label>
+      <div class="rows" style="margin:0 -16px">${rows||'<p class="empty-note" style="padding:0 16px">このイベントの記録はまだありません。</p>'}</div></div>`;
+  }).join(''):emptyBlock('イベントはまだありません','配信や歌みた・ライブの記録に「イベント」を入れるか、上のフォームでまとめて付けると、イベントごとのまとめがここに表示されます。');
+}
+$('#eventCards').addEventListener('click',e=>{
+  const b=e.target.closest('[data-stream]');if(b)return openStream(streams.find(s=>s.id===b.dataset.stream));
+  const p=e.target.closest('[data-work]');if(p)return openWork(works.find(w=>w.id===p.dataset.work));
+});
+$('#eventCards').addEventListener('change',async e=>{
+  const t=e.target.closest('.ev-memo');if(!t||!canWrite)return;
+  const n=t.dataset.event,cur=evMeta();
+  if(((cur[n]||{}).memo||'')===t.value)return;
+  try{apply(await run('saveEvents',{...cur,[n]:{...(cur[n]||{}),memo:t.value}}));toast('メモを保存しました')}
+  catch(err){toast(err.detail&&/不明な操作/.test(err.detail)?'GASのコードが古いようです。新しいCode.gsに差し替えてください。':errMsg(err))}
+});
+$('#evTagForm').addEventListener('submit',async e=>{
+  e.preventDefault();if(!canWrite)return;
+  const name=$('#ev_name').value.trim(),kw=BRK($('#ev_kw').value.trim()).toLowerCase(),err=$('#ev_err');
+  if(!name||!kw){err.textContent='イベント名とキーワードを入れてください。';return}
+  const hit=o=>!o.event&&BRK(`${o.title||''} ${o.note||''}`).toLowerCase().includes(kw);
+  const S=streams.filter(hit).map(o=>({...o,event:name})),W=works.filter(hit).map(o=>({...o,event:name}));
+  if(!S.length&&!W.length){err.textContent='キーワードに合う記録（イベント未設定のもの）がありません。';return}
+  err.textContent='まとめています…';const btn=$('#ev_apply');btn.disabled=true;
+  try{apply(await run('importAll',{streams:S,works:W,bank:null},'merge'));err.textContent='';$('#ev_kw').value='';toast(`配信${S.length}件・歌みた／出演${W.length}件を「${name}」にまとめました`)}
+  catch(x){err.textContent=errMsg(x)}finally{btn.disabled=false}
+});
+function renderAll(){renderMonth();renderWeek();renderInsights();renderList();renderWorks();renderEvents();renderBank()}
 
 // ---------- dialogs ----------
 document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>b.closest('dialog').close());
@@ -827,7 +893,7 @@ function openStream(s,preset){
   $('#s_thumbbtns').hidden=!(canWrite&&assets);$('#s_fetch').hidden=!canWrite;
   $('#s_thumbnote').textContent=canWrite&&!assets?'サムネ画像を追加できるのは、このアプリの編集者だけです。':'月間カレンダーの配信開始日に表示されます。';
   $('#gameList').innerHTML=[...new Set(streams.flatMap(x=>splitNames(x.game)))].map(g=>`<option value="${esc(g)}">`).join('');
-  $('#s_url').value=v.url||'';$('#s_note').value=v.note||'';$('#s_err').textContent='';showThumb();
+  $('#s_url').value=v.url||'';$('#s_note').value=v.note||'';$('#s_event').value=v.event||'';$('#s_err').textContent='';showThumb();
   lockForm($('#streamForm'),!canWrite);
   const del=$('#s_del');del.hidden=!(s&&canWrite);
   armDelete(del,async()=>{try{await db.collection('streams').doc(s.id).delete();$('#streamDlg').close();toast('削除しました')}catch(e){$('#s_err').textContent=errMsg(e)}});
@@ -902,7 +968,7 @@ $('#streamForm').addEventListener('submit',async e=>{
   e.preventDefault();if(!db)return;
   const data={date:$('#s_date').value,start:$('#s_start').value,end:$('#s_end').value,category:$('#s_cat').value,
     title:$('#s_title').value.trim(),game:splitNames($('#s_game').value).join('、'),collab:splitNames($('#s_collab').value).join('、'),url:$('#s_url').value.trim(),note:$('#s_note').value.trim(),
-    durationMin:parseDur($('#s_dur').value)||'',thumb:pendingThumb.thumb};
+    durationMin:parseDur($('#s_dur').value)||'',thumb:pendingThumb.thumb,event:$('#s_event').value.trim()};
   Object.assign(data,fixBrk(data));
   if(thumbBusy)return;
   if(!valid(data)){$('#s_err').textContent='日付を入れてください。';return}
@@ -923,7 +989,7 @@ function openWork(w){
   editingWork=w||null;const v=w||{date:ymd(new Date()),type:'cover'};
   $('#workDlgTitle').textContent=w?(canWrite?'記録を編集':'記録の詳細'):'歌みた・ライブを追加';
   $('#w_type').value=v.type||'cover';$('#w_date').value=v.date||'';$('#w_time').value=v.time||'';
-  $('#w_title').value=v.title||'';$('#w_with').value=v.with||'';$('#w_url').value=v.url||'';$('#w_note').value=v.note||'';$('#w_err').textContent='';
+  $('#w_title').value=v.title||'';$('#w_with').value=v.with||'';$('#w_url').value=v.url||'';$('#w_note').value=v.note||'';$('#w_event').value=v.event||'';$('#w_err').textContent='';
   lockForm($('#workForm'),!canWrite);
   const del=$('#w_del');del.hidden=!(w&&canWrite);
   armDelete(del,async()=>{try{await db.collection('works').doc(w.id).delete();$('#workDlg').close();toast('削除しました')}catch(e){$('#w_err').textContent=errMsg(e)}});
@@ -932,7 +998,7 @@ function openWork(w){
 $('#workForm').addEventListener('submit',async e=>{
   e.preventDefault();if(!db)return;
   const data={type:$('#w_type').value,date:$('#w_date').value,time:$('#w_time').value,title:$('#w_title').value.trim(),
-    with:splitNames($('#w_with').value).join('、'),url:$('#w_url').value.trim(),note:$('#w_note').value.trim()};
+    with:splitNames($('#w_with').value).join('、'),url:$('#w_url').value.trim(),note:$('#w_note').value.trim(),event:$('#w_event').value.trim()};
   Object.assign(data,fixBrk(data));
   if(!parseYmd(data.date)){$('#w_err').textContent='日付を入れてください。';return}
   if(!data.title){$('#w_err').textContent='タイトル・曲名・公演名を入れてください。';return}
@@ -1006,7 +1072,7 @@ async function call(cfg,fn,args){
   return j.data;
 }
 const run=(fn,...args)=>{const cfg=getCfg();if(!cfg){const err=new Error('nocfg');err.code='nocfg';return Promise.reject(err)}return call(cfg,fn,args)};
-function apply(d){if(!d)return;setWritable(true);store={streams:d.streams||[],works:d.works||[],bank:d.bank||null,profile:d.profile||null};renderName();loadedOnce=true;syncVars();renderAll();updateStatus()}
+function apply(d){if(!d)return;setWritable(true);store={streams:d.streams||[],works:d.works||[],bank:d.bank||null,events:d.events||null,profile:d.profile||null};renderName();loadedOnce=true;syncVars();renderAll();updateStatus()}
 let refreshing=false,brkFixing=false;
 async function fixOldBrackets(){
   if(brkFixing)return;
@@ -1067,7 +1133,7 @@ function fileToThumb(f){return new Promise((res,rej)=>{
 
 // ---------- バックアップ ----------
 $('#backupBtn').onclick=()=>{$('#imp_err').textContent='';updateStatus();$('#backupDlg').showModal()};
-const exportData=()=>({app:'stream-log',version:1,exportedAt:new Date().toISOString(),profile:store.profile||null,streams:store.streams,works:store.works,bank:store.bank});
+const exportData=()=>({app:'stream-log',version:1,exportedAt:new Date().toISOString(),events:store.events||null,profile:store.profile||null,streams:store.streams,works:store.works,bank:store.bank});
 $('#exportBtn').onclick=()=>{
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(exportData(),null,1)],{type:'application/json'}));
   a.download=`${profName()}配信ログ_${ymd(new Date())}.json`;document.body.appendChild(a);a.click();
@@ -1095,7 +1161,7 @@ async function importJson(text,badMsg){
   if(mode==='replace'&&!$('#replaceOk').checked){errEl.textContent=`入れ替えると今の記録（配信${streams.length}件・歌みた／ライブ${works.length}件）が消えます。上の確認にチェックを入れてから、もう一度読み込んでください。`;return}
   errEl.textContent='取り込み中…';let n=0;
   try{
-    apply(await run('importAll',{streams:inS,works:inW,bank:d.bank||null,profile:d.profile||null},mode));n=inS.length+inW.length;
+    apply(await run('importAll',{streams:inS,works:inW,events:d.events||null,bank:d.bank||null,profile:d.profile||null},mode));n=inS.length+inW.length;
     errEl.textContent='';
     $('#importText').value='';$('#backupDlg').close();toast(`配信${inS.length}件・歌みた／ライブ${inW.length}件を読み込みました`);
   }catch(err){errEl.textContent=`${n}件まで取り込みました。${errMsg(err)}`}
