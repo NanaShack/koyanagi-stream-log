@@ -496,6 +496,11 @@ const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const splitNames=s=>String(s||'').split(/[,、，;；\/／]/).map(x=>x.trim()).filter(Boolean);
 const pad=n=>String(n).padStart(2,'0');
+// 〖〗（白抜きすみつきかっこ）を【】にそろえる
+const BRK=s=>String(s??'').replace(/〖/g,'【').replace(/〗/g,'】');
+const TEXT_FIELDS=['title','game','collab','note','with'];
+const fixBrk=o=>{const r={...o};for(const k of TEXT_FIELDS)if(typeof r[k]==='string')r[k]=BRK(r[k]);return r};
+const hasBrk=o=>TEXT_FIELDS.some(k=>typeof o[k]==='string'&&/[〖〗]/.test(o[k]));
 const toMin=t=>{const m=/^(\d{1,2}):(\d{2})$/.exec(t||'');return m?(+m[1])*60+(+m[2]):null};
 const ymd=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 const parseYmd=s=>{const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(s||'');return m?new Date(+m[1],m[2]-1,+m[3]):null};
@@ -678,7 +683,7 @@ function renderInsights(){
 // ---------- list views ----------
 function emptyBlock(title,body,btn){return `<div class="empty"><h2>${title}</h2><p>${body}</p>${canWrite&&btn?btn:''}</div>`}
 function renderList(){
-  const q=$('#q').value.trim().toLowerCase(),cf=$('#catFilter').value,co=$('#collabFilter').value;
+  const q=BRK($('#q').value.trim()).toLowerCase(),cf=$('#catFilter').value,co=$('#collabFilter').value;
   const rows=streams.filter(valid).filter(s=>{
     if(cf&&s.category!==cf)return false;
     const n=splitNames(s.collab).length;
@@ -873,6 +878,7 @@ $('#streamForm').addEventListener('submit',async e=>{
   const data={date:$('#s_date').value,start:$('#s_start').value,end:$('#s_end').value,category:$('#s_cat').value,
     title:$('#s_title').value.trim(),game:splitNames($('#s_game').value).join('、'),collab:splitNames($('#s_collab').value).join('、'),url:$('#s_url').value.trim(),note:$('#s_note').value.trim(),
     durationMin:parseDur($('#s_dur').value)||'',thumb:pendingThumb.thumb};
+  Object.assign(data,fixBrk(data));
   if(thumbBusy)return;
   if(!valid(data)){$('#s_err').textContent='日付を入れてください。';return}
   if(parseDur($('#s_dur').value)===null){$('#s_err').textContent='総配信時間は「5:53:33」「5:53」「354」のどれかの形で入れてください。';return}
@@ -902,6 +908,7 @@ $('#workForm').addEventListener('submit',async e=>{
   e.preventDefault();if(!db)return;
   const data={type:$('#w_type').value,date:$('#w_date').value,time:$('#w_time').value,title:$('#w_title').value.trim(),
     with:splitNames($('#w_with').value).join('、'),url:$('#w_url').value.trim(),note:$('#w_note').value.trim()};
+  Object.assign(data,fixBrk(data));
   if(!parseYmd(data.date)){$('#w_err').textContent='日付を入れてください。';return}
   if(!data.title){$('#w_err').textContent='タイトル・曲名・公演名を入れてください。';return}
   const btn=$('#w_save');btn.disabled=true;
@@ -922,7 +929,7 @@ $('#bulkForm').addEventListener('submit',async e=>{
     const date=(f[0]||'').replace(/[\/.]/g,'-').replace(/-(\d)(?!\d)/g,'-0$1');
     const norm=t=>{const m=/^(\d{1,2}):(\d{2})$/.exec(t||'');return m?pad(+m[1]%24)+':'+m[2]:''};
     const s={date,start:norm(f[1]),end:norm(f[2]),category:CAT_WORDS[f[3]]||'other',title:f[4]||'',game:splitNames(f[5]).join('、'),collab:splitNames(f[6]).join('、'),url:f[7]||'',note:'',durationMin:''};
-    if(valid(s)&&(!s.start||s.start!==s.end))items.push(s);else bad.push(i+1);
+    if(valid(s)&&(!s.start||s.start!==s.end))items.push(fixBrk(s));else bad.push(i+1);
   });
   if(!items.length){$('#b_err').textContent='取り込める行がありません。日付と時刻の書き方を確認してください。';return}
   const btn=$('#b_save');btn.disabled=true;let ok=0;
@@ -975,10 +982,18 @@ async function call(cfg,fn,args){
 }
 const run=(fn,...args)=>{const cfg=getCfg();if(!cfg){const err=new Error('nocfg');err.code='nocfg';return Promise.reject(err)}return call(cfg,fn,args)};
 function apply(d){if(!d)return;setWritable(true);store={streams:d.streams||[],works:d.works||[],bank:d.bank||null,profile:d.profile||null};renderName();loadedOnce=true;syncVars();renderAll();updateStatus()}
-let refreshing=false;
+let refreshing=false,brkFixing=false;
+async function fixOldBrackets(){
+  if(brkFixing)return;
+  const S=streams.filter(hasBrk).map(fixBrk),W=works.filter(hasBrk).map(fixBrk);
+  if(!S.length&&!W.length)return;
+  brkFixing=true;
+  try{apply(await run('importAll',{streams:S,works:W,bank:null},'merge'));toast(`〖〗を【】にそろえました（${S.length+W.length}件）`)}
+  catch(e){}finally{brkFixing=false}
+}
 async function refresh(){
   if(refreshing)return;refreshing=true;
-  try{apply(await run('getAll'))}
+  try{apply(await run('getAll'));setTimeout(fixOldBrackets,0)}
   catch(e){
     if(e.code==='nocfg'){updateStatus('「接続設定」でGASのURLと合言葉を入れてください。');setWritable(false);return}
     if(e.code==='auth'){updateStatus('合言葉が違います。「接続設定」を確認してください。');setWritable(false);return}
@@ -1050,7 +1065,7 @@ async function importJson(text,badMsg){
   let d;try{d=JSON.parse(text)}catch(_){errEl.textContent=badMsg;return}
   if(!d||!Array.isArray(d.streams)||!Array.isArray(d.works)){errEl.textContent='このアプリのバックアップではないようです。';return}
   const clean=a=>a.filter(x=>x&&typeof x==='object').map(x=>({...x,id:(String(x.id||'').replace(/[^\w\-.~:@+]/g,'_').replace(/^\.+$/,'')||newId())}));
-  const inS=clean(d.streams),inW=clean(d.works);
+  const inS=clean(d.streams).map(fixBrk),inW=clean(d.works).map(fixBrk);
   const mode=$('#importMode').value;
   if(mode==='replace'&&!$('#replaceOk').checked){errEl.textContent=`入れ替えると今の記録（配信${streams.length}件・歌みた／ライブ${works.length}件）が消えます。上の確認にチェックを入れてから、もう一度読み込んでください。`;return}
   errEl.textContent='取り込み中…';let n=0;
