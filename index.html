@@ -169,6 +169,7 @@ label.f textarea{resize:vertical;min-height:70px}
 .hint{font-size:12px;color:var(--muted);margin:0}
 .dlg-actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;align-items:center}
 .dlg-actions .left{margin-right:auto}
+.urlrow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end}
 .hint.calc{color:var(--accent);font-weight:500;min-height:1.2em;margin:0}
 .err{color:var(--now);font-size:12.5px;min-height:1em;margin:0}
 code.sample{display:block;font-family:ui-monospace,monospace;font-size:12px;background:var(--sunk);border:1px solid var(--line);border-radius:8px;padding:8px 10px;white-space:pre;overflow-x:auto}
@@ -380,6 +381,7 @@ code.sample{display:block;font-family:ui-monospace,monospace;font-size:12px;back
   <form id="streamForm" novalidate>
     <h2 id="streamDlgTitle">配信を追加</h2>
     <div class="fgrid">
+      <div class="full urlrow"><label class="f">アーカイブURL<input type="url" id="s_url" placeholder="YouTubeのURLを貼ると時刻を自動で入れます"></label><button type="button" class="btn" id="s_fetch">URLから取得</button></div>
       <label class="f">日付（開始日）<input type="date" id="s_date" required></label>
       <label class="f">開始<input type="time" id="s_start"></label>
       <label class="f">終了<input type="time" id="s_end"></label>
@@ -402,7 +404,6 @@ code.sample{display:block;font-family:ui-monospace,monospace;font-size:12px;back
           <p class="hint">画像を選ばなくても、YouTube のURLを入れるとそのサムネを表示します（ネット接続時）。</p>
         </div>
       </div>
-      <label class="f full">アーカイブURL<input type="url" id="s_url" placeholder="https://"></label>
       <label class="f full">メモ<textarea id="s_note" placeholder="遊んだゲーム名、企画内容、印象に残った話など"></textarea></label>
     </div>
     <datalist id="gameList"></datalist>
@@ -822,7 +823,7 @@ function openStream(s,preset){
   const dm=durOf(v);$('#s_dur').value=dm?fmtHM(dm):'';
   updateCalc();
   pendingThumb={thumb:v.thumb||'',thumbId:v.thumbId||''};showThumb();
-  $('#s_thumbbtns').hidden=!(canWrite&&assets);
+  $('#s_thumbbtns').hidden=!(canWrite&&assets);$('#s_fetch').hidden=!canWrite;
   $('#s_thumbnote').textContent=canWrite&&!assets?'サムネ画像を追加できるのは、このアプリの編集者だけです。':'月間カレンダーの配信開始日に表示されます。';
   $('#gameList').innerHTML=[...new Set(streams.flatMap(x=>splitNames(x.game)))].map(g=>`<option value="${esc(g)}">`).join('');
   $('#s_url').value=v.url||'';$('#s_note').value=v.note||'';$('#s_err').textContent='';showThumb();
@@ -834,6 +835,29 @@ function openStream(s,preset){
 let pendingThumb={thumb:'',thumbId:''},thumbBusy=false;
 function showThumb(){const src=pendingThumb.thumb||ytThumb($('#s_url').value);$('#s_tprev').innerHTML=src?`<img src="${esc(src)}" alt="サムネ" onerror="this.parentNode.textContent='サムネなし'">`:'サムネなし';$('#s_thumbclear').hidden=!pendingThumb.thumb}
 $('#s_url').addEventListener('input',()=>showThumb());
+// YouTubeのURLから開始・終了時刻とタイトルを取得（GAS経由）
+let ytBusy=false;
+async function fetchYt(auto){
+  const u=$('#s_url').value.trim(),out=$('#s_calc');
+  if(!ytId(u)){if(!auto)out.textContent='YouTubeのURLを入れてください。';return}
+  if(!canWrite||ytBusy)return;
+  const btn=$('#s_fetch'),label=btn.textContent;ytBusy=true;btn.disabled=true;btn.textContent='取得中…';
+  try{
+    const r=await run('ytInfo',u);
+    if(!r.start){out.textContent=r.scheduled?`まだ配信前のようです（予定：${r.scheduled}）。`:'配信の開始時刻が見つかりませんでした（ライブ配信ではない動画かもしれません）。';
+      if(r.title&&!$('#s_title').value.trim())$('#s_title').value=BRK(r.title);return}
+    $('#s_date').value=r.date;$('#s_start').value=r.start;
+    if(r.end)$('#s_end').value=r.end;
+    if(r.durationMin)$('#s_dur').value=fmtHM(r.durationMin);
+    if(r.title&&!$('#s_title').value.trim())$('#s_title').value=BRK(r.title);
+    updateCalc();
+    out.textContent=`YouTubeから取得：${r.date} ${r.start}〜${r.end||'（配信中）'}${r.durationMin?`・${fmtDur(r.durationMin)}`:''}`;
+  }catch(e){
+    out.textContent=e.detail&&/不明な操作/.test(e.detail)?'GASのコードが古いようです。新しいCode.gsに差し替えて「新バージョン」でデプロイしてください。':errMsg(e);
+  }finally{ytBusy=false;btn.disabled=false;btn.textContent=label}
+}
+$('#s_fetch').onclick=()=>fetchYt(false);
+$('#s_url').addEventListener('paste',()=>setTimeout(()=>fetchYt(true),0));
 $('#s_thumbfile').addEventListener('change',async e=>{
   const f=e.target.files&&e.target.files[0];e.target.value='';if(!f||!assets)return;
   if(!/^image\//.test(f.type)){$('#s_thumbnote').textContent='画像ファイルを選んでください。';return}
