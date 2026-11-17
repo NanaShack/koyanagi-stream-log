@@ -91,6 +91,7 @@ nav.tabs button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(-
 .pin{font-size:11px;line-height:1.35;border-radius:5px;padding:2px 6px;border:1px solid var(--line);background:var(--sunk);text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
 .pin b{font-weight:700;color:var(--c-song);margin-right:3px}
 .pin.live b{color:var(--c-plan)}
+.pin.dance b{color:var(--c-game)}
 .axis{position:sticky;left:0;z-index:2;background:var(--surface);height:calc(var(--hour)*24);position:sticky}
 .axis span{position:absolute;right:6px;transform:translateY(-50%);font-family:var(--font-num);font-size:11px;color:var(--muted)}
 .col{position:relative;height:calc(var(--hour)*24);border-left:1px solid var(--line);
@@ -489,9 +490,9 @@ code.sample{display:block;font-family:ui-monospace,monospace;font-size:12px;back
 (() => {
 const NS='sl:'+location.pathname.replace(/[^/]*$/,'')+':'; // 同じ github.io に複数置いても設定が混ざらないよう、置き場所ごとに分ける
 const CATS=[{id:'talk',label:'雑談'},{id:'game',label:'ゲーム'},{id:'song',label:'歌枠'},{id:'plan',label:'企画'},{id:'other',label:'その他'}];
-const TYPES=[{id:'cover',label:'歌ってみた',short:'歌みた'},{id:'original',label:'オリジナル曲',short:'オリ曲'},{id:'live',label:'ライブ出演',short:'LIVE'},{id:'event',label:'イベント・メディア',short:'出演'}];
+const TYPES=[{id:'cover',label:'歌ってみた',short:'歌みた'},{id:'original',label:'オリジナル曲',short:'オリ曲'},{id:'dance',label:'踊ってみた',short:'踊みた'},{id:'live',label:'ライブ出演',short:'LIVE'},{id:'event',label:'イベント・メディア',short:'出演'}];
 const catOf=id=>CATS.find(c=>c.id===id)||CATS[4];
-const typeOf=id=>TYPES.find(t=>t.id===id)||TYPES[3];
+const typeOf=id=>TYPES.find(t=>t.id===id)||TYPES.find(t=>t.id==='event');
 const WD=['日','月','火','水','木','金','土'];
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -566,7 +567,7 @@ function renderMonth(){
           `<span class="ph">${esc(s.game||s.title||c.label)}</span>`+(src?`<img src="${esc(src)}" alt="${esc(s.title||'')}" loading="lazy" onerror="this.remove()">`:'')+
           `<span class="tm">${toMin(s.start)==null?'時刻?':esc(s.start)}</span></button>`}).join('')+
       (list.length>2?`<span class="mmore">ほか${list.length-2}件</span>`:'')+
-      pins.map(w=>`<button type="button" class="pin ${w.type==='live'||w.type==='event'?'live':''}" data-work="${esc(w.id)}"><b>${typeOf(w.type).short}</b>${esc(w.title||'')}</button>`).join('')+
+      pins.map(w=>`<button type="button" class="pin ${w.type==='live'||w.type==='event'?'live':w.type==='dance'?'dance':''}" data-work="${esc(w.id)}"><b>${typeOf(w.type).short}</b>${esc(w.title||'')}</button>`).join('')+
       `</div>`;
   }
   $('#mcal').innerHTML=h;
@@ -606,7 +607,7 @@ function renderWeek(){
     const pins=works.filter(w=>w.date===ds).sort((a,b)=>(a.time||'').localeCompare(b.time||''));
     const unk=streams.filter(s=>s.date===ds&&valid(s)&&!placed(s));
     const cls=['dayhead',d.getDay()===6?'sat':'',d.getDay()===0?'sun':'',dayNum(d)===todayN?'today':''].join(' ');
-    h+=`<div class="${cls}"><div class="d"><b>${d.getDate()}</b><span>${WD[d.getDay()]}</span></div>${unk.map(s=>`<button type="button" class="pin unk" data-stream="${esc(s.id)}" title="${esc(timeLabel(s)+' '+(s.title||''))}"><b>${toMin(s.start)==null?'時刻?':esc(s.start)+'〜'}</b>${esc(s.title||catOf(s.category).label)}</button>`).join('')}${pins.map(w=>`<button type="button" class="pin ${w.type==='live'||w.type==='event'?'live':''}" data-work="${esc(w.id)}" title="${esc(typeOf(w.type).label+'：'+w.title)}"><b>${typeOf(w.type).short}</b>${esc(w.title||'')}</button>`).join('')}</div>`;
+    h+=`<div class="${cls}"><div class="d"><b>${d.getDate()}</b><span>${WD[d.getDay()]}</span></div>${unk.map(s=>`<button type="button" class="pin unk" data-stream="${esc(s.id)}" title="${esc(timeLabel(s)+' '+(s.title||''))}"><b>${toMin(s.start)==null?'時刻?':esc(s.start)+'〜'}</b>${esc(s.title||catOf(s.category).label)}</button>`).join('')}${pins.map(w=>`<button type="button" class="pin ${w.type==='live'||w.type==='event'?'live':w.type==='dance'?'dance':''}" data-work="${esc(w.id)}" title="${esc(typeOf(w.type).label+'：'+w.title)}"><b>${typeOf(w.type).short}</b>${esc(w.title||'')}</button>`).join('')}</div>`;
   }
   h+=`<div class="axis">${Array.from({length:25},(_,i)=>`<span style="top:calc(var(--hour)*${i})">${i%3===0||i===24?pad(i):''}</span>`).join('')}</div>`;
   // segments per day
@@ -709,7 +710,7 @@ function renderWorks(){
   for(const w of rows){
     const y=w.date.slice(0,4);if(y!==yr){yr=y;h+=`<div class="yearhead">${y}</div>`}
     const d=parseYmd(w.date),t=typeOf(w.type),ws=splitNames(w.with);
-    const col=w.type==='cover'?'song':w.type==='original'?'other':w.type==='live'?'plan':'talk';
+    const col=w.type==='cover'?'song':w.type==='original'?'other':w.type==='dance'?'game':w.type==='live'?'plan':'talk';
     h+=`<button type="button" class="row" data-work="${esc(w.id)}"><span class="date">${w.date.replace(/-/g,'.')}<small>${WD[d.getDay()]}</small></span><span class="time">${esc(w.time||'')}</span><span class="title">${esc(w.title||t.label)}${ws.length?`<span class="sub">with ${esc(ws.join('、'))}</span>`:''}${w.note?`<span class="sub">${esc(w.note)}</span>`:''}</span><span class="chip" style="--c:var(--c-${col})">${t.label}</span></button>`;
   }
   $('#workRows').innerHTML=h||(works.length?emptyBlock('この種類の記録はありません','別の種類を選んでください。'):emptyBlock('歌ってみた・ライブ出演の記録はまだありません','投稿日や出演日を入れると、週間タイムラインの日付の上にも表示されます。','<button class="btn primary" type="button" data-add="work">最初の記録を追加</button>'));
