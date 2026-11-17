@@ -499,7 +499,7 @@ const ymd=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 const parseYmd=s=>{const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(s||'');return m?new Date(+m[1],m[2]-1,+m[3]):null};
 const dayNum=d=>Math.round(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate())/864e5);
 const addDays=(d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);return x};
-const mondayOf=d=>{const x=new Date(d.getFullYear(),d.getMonth(),d.getDate());return addDays(x,-((x.getDay()+6)%7))};
+const weekStartOf=d=>{const x=new Date(d.getFullYear(),d.getMonth(),d.getDate());return addDays(x,-x.getDay())}; // 日曜始まり
 const durOf=s=>{const a=toMin(s.start),b=toMin(s.end);if(a!=null&&b!=null){let d=b-a;if(d<=0)d+=1440;return d}const m=+s.durationMin;return m>0?Math.round(m):0};
 const fmtDur=m=>{const h=Math.floor(m/60),r=m%60;return h?`${h}時間${r?r+'分':''}`:`${r}分`};
 const valid=s=>!!parseYmd(s.date);
@@ -509,7 +509,7 @@ const timeLabel=s=>toMin(s.start)==null?'時刻未確定':placed(s)?`${s.start}�
 const durLabel=s=>durOf(s)?fmtDur(durOf(s)):'長さ不明';
 
 let streams=[],works=[],canWrite=true,db=null;
-let weekStart=mondayOf(new Date());
+let weekStart=weekStartOf(new Date());
 let tab='month',assets=null;
 let monthCur=new Date(new Date().getFullYear(),new Date().getMonth(),1);
 const ytId=u=>{const m=/(?:youtube\.com\/(?:watch\?(?:.*&)?v=|live\/|shorts\/|embed\/)|youtu\.be\/)([\w-]{11})/.exec(u||'');return m?m[1]:''};
@@ -543,9 +543,9 @@ function renderMonth(){
   for(const s of streams){if(!valid(s))continue;(byDay.get(s.date)||byDay.set(s.date,[]).get(s.date)).push(s)}
   for(const l of byDay.values())l.sort((a,b)=>(a.start||'99').localeCompare(b.start||'99'));
   const todayS=ymd(new Date());
-  let h=WD.slice(1).concat(WD[0]).map((w,i)=>`<div class="mhead ${i===5?'sat':''} ${i===6?'sun':''}">${w}</div>`).join('');
-  const first=new Date(y,m,1),start=addDays(first,-((first.getDay()+6)%7));
-  const weeks=Math.ceil((((first.getDay()+6)%7)+days)/7);
+  let h=WD.map((w,i)=>`<div class="mhead ${i===6?'sat':''} ${i===0?'sun':''}">${w}</div>`).join('');
+  const first=new Date(y,m,1),start=addDays(first,-first.getDay());
+  const weeks=Math.ceil((first.getDay()+days)/7);
   for(let i=0;i<weeks*7;i++){
     const d=addDays(start,i),ds=ymd(d),inM=d.getMonth()===m;
     const list=byDay.get(ds)||[],pins=works.filter(w=>w.date===ds);
@@ -579,7 +579,7 @@ $('#mcal').addEventListener('click',e=>{
   const b=e.target.closest('[data-stream]');if(b)return openStream(streams.find(s=>s.id===b.dataset.stream));
   const p=e.target.closest('[data-work]');if(p)return openWork(works.find(w=>w.id===p.dataset.work));
   const day=e.target.closest('[data-day]');
-  if(day){weekStart=mondayOf(parseYmd(day.dataset.day));renderWeek();setTab('week');window.scrollTo({top:0})}
+  if(day){weekStart=weekStartOf(parseYmd(day.dataset.day));renderWeek();setTab('week');window.scrollTo({top:0})}
 });
 $('#mcal').addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('.mday')){e.preventDefault();e.target.click()}});
 $('#prevM').onclick=()=>{monthCur=new Date(monthCur.getFullYear(),monthCur.getMonth()-1,1);renderMonth()};
@@ -653,8 +653,8 @@ $('#timeline').addEventListener('click',e=>{
 });
 $('#prevW').onclick=()=>{weekStart=addDays(weekStart,-7);renderWeek()};
 $('#nextW').onclick=()=>{weekStart=addDays(weekStart,7);renderWeek()};
-$('#todayW').onclick=()=>{weekStart=mondayOf(new Date());renderWeek()};
-$('#jumpDate').onchange=e=>{const d=parseYmd(e.target.value);if(d){weekStart=mondayOf(d);renderWeek()}};
+$('#todayW').onclick=()=>{weekStart=weekStartOf(new Date());renderWeek()};
+$('#jumpDate').onchange=e=>{const d=parseYmd(e.target.value);if(d){weekStart=weekStartOf(d);renderWeek()}};
 
 function renderInsights(){
   const buckets=new Array(24).fill(0);
@@ -881,7 +881,7 @@ $('#streamForm').addEventListener('submit',async e=>{
     if(editingStream)await db.collection('streams').doc(editingStream.id).set({...data,createdAt:editingStream.createdAt||Date.now()});
     else await db.collection('streams').add({...data,createdAt:Date.now()});
     $('#streamDlg').close();toast(editingStream?'更新しました':'追加しました');
-    if(!editingStream){const d=parseYmd(data.date);weekStart=mondayOf(d);renderWeek()}
+    if(!editingStream){const d=parseYmd(data.date);weekStart=weekStartOf(d);renderWeek()}
   }catch(err){$('#s_err').textContent=errMsg(err)}finally{btn.disabled=false}
 });
 
