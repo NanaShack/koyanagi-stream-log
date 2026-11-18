@@ -519,6 +519,8 @@ const splitNames=s=>String(s||'').split(/[,、，;；\/／]/).map(x=>x.trim()).f
 const pad=n=>String(n).padStart(2,'0');
 // 〖〗（白抜きすみつきかっこ）を【】にそろえる
 const BRK=s=>String(s??'').replace(/〖/g,'【').replace(/〗/g,'】');
+// 検索用：全角/半角・大文字/小文字・空白の違いを無視して比べる
+const KW=s=>BRK(s).normalize('NFKC').toLowerCase().replace(/\s+/g,'');
 const TEXT_FIELDS=['title','game','collab','note','with'];
 const fixBrk=o=>{const r={...o};for(const k of TEXT_FIELDS)if(typeof r[k]==='string')r[k]=BRK(r[k]);return r};
 const hasBrk=o=>TEXT_FIELDS.some(k=>typeof o[k]==='string'&&/[〖〗]/.test(o[k]));
@@ -864,9 +866,9 @@ $('#eventCards').addEventListener('change',async e=>{
 });
 $('#evTagForm').addEventListener('submit',async e=>{
   e.preventDefault();if(!canWrite)return;
-  const name=$('#ev_name').value.trim(),kw=BRK($('#ev_kw').value.trim()).toLowerCase(),err=$('#ev_err');
+  const name=$('#ev_name').value.trim(),kw=KW($('#ev_kw').value),err=$('#ev_err');
   if(!name||!kw){err.textContent='イベント名とキーワードを入れてください。';return}
-  const hit=o=>!o.event&&BRK(`${o.title||''} ${o.note||''}`).toLowerCase().includes(kw);
+  const hit=o=>!o.event&&KW(`${o.title||''} ${o.note||''}`).includes(kw);
   const S=streams.filter(hit).map(o=>({...o,event:name})),W=works.filter(hit).map(o=>({...o,event:name}));
   if(!S.length&&!W.length){err.textContent='キーワードに合う記録（イベント未設定のもの）がありません。';return}
   err.textContent='まとめています…';const btn=$('#ev_apply');btn.disabled=true;
