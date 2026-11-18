@@ -235,6 +235,20 @@ code.sample{display:block;font-family:ui-monospace,monospace;font-size:12px;back
 .card form{display:grid;gap:10px}
 .card .fgrid{grid-template-columns:repeat(2,minmax(0,1fr))}
 .subhead{margin:6px 0 0;padding-top:12px;border-top:1px solid var(--line)}
+.rules{display:grid}
+.rule{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;gap:4px 10px;align-items:center;padding:8px 0;border-top:1px solid var(--line);font-size:13px}
+.rule:first-child{border-top:0}
+.rule.off{opacity:.5}
+.rule input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent)}
+.rule .rn{min-width:0;overflow-wrap:anywhere;font-weight:700}
+.rule .rn small{display:block;font-weight:400;color:var(--muted);font-size:11.5px}
+.rule .ra{font-family:var(--font-num);font-weight:600;white-space:nowrap;text-align:right}
+.rule .rb{display:flex;gap:2px}
+.rule .rb button{border:0;background:none;color:var(--muted);font-size:12px;padding:2px 6px;border-radius:6px}
+.rule .rb button:hover{color:var(--accent);background:var(--sunk)}
+.rule .rb button.del:hover{color:var(--now)}
+.timepair{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:6px;align-items:end}
+.timepair span{padding-bottom:9px;color:var(--muted)}
 
 .toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 14px;border-radius:8px;font-size:13px;z-index:50;max-width:calc(100vw - 32px)}
 @media (prefers-reduced-motion:no-preference){.blk,.btn{transition:background .15s,border-color .15s}}
@@ -375,6 +389,19 @@ code.sample{display:block;font-family:ui-monospace,monospace;font-size:12px;back
           <p class="hint">例：1配信100円＋1時間100円なら、2時間半の配信で350円。開始日より前の配信は数えません。</p>
           <p class="err" id="bk_err"></p>
           <div class="dlg-actions"><button class="btn primary" type="submit" id="bk_save">ルールを保存</button></div>
+        </form>
+        <h3 class="subhead">追加ルール<small>条件に合う配信に上乗せ</small></h3>
+        <div class="rules" id="bkRules"></div>
+        <form id="bkXForm" novalidate>
+          <div class="fgrid">
+            <label class="f full">条件<select id="bx_kind"></select></label>
+            <div class="full" id="bx_val"></div>
+            <label class="f">金額（円）<input type="number" id="bx_amt" min="1" step="10" inputmode="numeric" placeholder="例：200"></label>
+            <label class="f">数え方<select id="bx_unit"><option value="each">1回ごと</option><option value="hour">配信1時間ごと</option></select></label>
+            <label class="f full">ルール名（任意）<input type="text" id="bx_name" placeholder="空欄なら条件からつけます（例：深夜ボーナス）"></label>
+          </div>
+          <p class="err" id="bx_err"></p>
+          <div class="dlg-actions"><button class="btn ghost" type="button" id="bx_cancel" hidden>編集をやめる</button><button class="btn" type="submit" id="bx_save">ルールを追加</button></div>
         </form>
         <h3 class="subhead">入金・出金を記録</h3>
         <form id="bkEntryForm" novalidate>
@@ -745,17 +772,68 @@ let bank=null,bankRef=null,bankLoaded=false,bankChain=Promise.resolve();
 const BANK_DEFAULT={mode:'all',perStream:100,perHour:100,perWork:500,since:'',goal:30000,goalName:'',watched:{},entries:[]};
 const yen=n=>(n<0?'−':'')+'¥'+Math.abs(Math.round(n)).toLocaleString('ja-JP');
 const cfg=()=>({...BANK_DEFAULT,...(bank||{})});
+// 追加ルール：条件に合う配信・歌みた／ライブに上乗せする
+const RULE_KINDS=[
+  {id:'cat',label:'配信内容が○○',target:'stream',val:'cat'},
+  {id:'collab',label:'コラボ配信',target:'stream',val:'none'},
+  {id:'person',label:'コラボ相手に○○がいる',target:'stream',val:'text',vl:'コラボ相手の名前',ph:'例：渡会雲雀'},
+  {id:'game',label:'ゲームタイトルに○○を含む',target:'stream',val:'text',vl:'ゲームタイトル（一部でOK）',ph:'例：APEX'},
+  {id:'word',label:'タイトル・メモに○○を含む',target:'stream',val:'text',vl:'含む言葉',ph:'例：記念'},
+  {id:'long',label:'配信時間が○時間以上',target:'stream',val:'num',vl:'何時間以上',ph:'例：5'},
+  {id:'time',label:'開始時刻が○時〜○時の間',target:'stream',val:'time'},
+  {id:'weekend',label:'土日の配信',target:'stream',val:'none'},
+  {id:'worktype',label:'歌みた・ライブの種類が○○',target:'work',val:'type'},
+];
+const kindOf=id=>RULE_KINDS.find(k=>k.id===id)||RULE_KINDS[0];
+function ruleMatch(r,x,isWork){
+  const k=kindOf(r.kind);if((k.target==='work')!==isWork)return false;
+  const v=String(r.value||'').trim().toLowerCase();
+  switch(r.kind){
+    case 'cat':return x.category===r.value;
+    case 'collab':return splitNames(x.collab).length>0;
+    case 'person':return !!v&&splitNames(x.collab).some(n=>n.toLowerCase().includes(v));
+    case 'game':return !!v&&String(x.game||'').toLowerCase().includes(v);
+    case 'word':return !!v&&`${x.title||''} ${x.note||''}`.toLowerCase().includes(v);
+    case 'long':{const h=+r.value;return h>0&&durOf(x)>=h*60}
+    case 'time':{const m=toMin(x.start),a=toMin(r.from),z=toMin(r.to);if(m==null||a==null||z==null||a===z)return false;return a<z?(m>=a&&m<z):(m>=a||m<z)}
+    case 'weekend':{const d=parseYmd(x.date);return !!d&&(d.getDay()===0||d.getDay()===6)}
+    case 'worktype':return x.type===r.value;
+  }
+  return false;
+}
+const ruleAmount=(r,s)=>r.unit==='hour'?Math.round(r.amount*durOf(s)/60):r.amount;
+function ruleDesc(r){
+  switch(r.kind){
+    case 'cat':return `${catOf(r.value).label}の配信`;
+    case 'collab':return 'コラボ配信';
+    case 'person':return `${r.value}さんとのコラボ`;
+    case 'game':return `「${r.value}」の配信`;
+    case 'word':return `「${r.value}」を含む配信`;
+    case 'long':return `${r.value}時間以上の配信`;
+    case 'time':return `${r.from}〜${r.to}開始の配信`;
+    case 'weekend':return '土日の配信';
+    case 'worktype':return typeOf(r.value).label;
+  }
+  return '';
+}
 function bankItems(){
   const b=cfg(),items=[];
+  const rules=(b.rules||[]).filter(r=>r.on!==false);
+  const extra=(base,hits)=>hits.length?` ／ 基本${yen(base)}`+hits.map(h=>`＋${h.r.name||ruleDesc(h.r)} ${yen(h.a)}`).join(''):'';
   for(const s of streams){
     if(!valid(s)||(b.since&&s.date<b.since))continue;
-    const amt=Math.round(b.perStream+b.perHour*durOf(s)/60);
+    const base=Math.round(b.perStream+b.perHour*durOf(s)/60);
+    const hits=rules.filter(r=>ruleMatch(r,s,false)).map(r=>({r,a:ruleAmount(r,s)})).filter(h=>h.a);
+    const amt=base+hits.reduce((a,h)=>a+h.a,0);
     const counted=b.mode==='all'||!!b.watched[s.id];
-    items.push({kind:'stream',auto:true,id:s.id,date:s.date,sort:s.date+(s.start||'00:00'),label:s.title||catOf(s.category).label,sub:`${timeLabel(s)}・${durLabel(s)}`,amount:amt,counted});
+    items.push({kind:'stream',auto:true,id:s.id,date:s.date,sort:s.date+(s.start||'00:00'),label:s.title||catOf(s.category).label,sub:`${timeLabel(s)}・${durLabel(s)}`+extra(base,hits),amount:amt,counted,hits:hits.map(h=>h.r.id)});
   }
-  if(b.perWork>0)for(const w of works){
+  for(const w of works){
     if(!parseYmd(w.date)||(b.since&&w.date<b.since))continue;
-    items.push({kind:'work',auto:true,id:w.id,date:w.date,sort:w.date+(w.time||'99'),label:w.title||typeOf(w.type).label,sub:typeOf(w.type).label,amount:b.perWork,counted:true});
+    const base=b.perWork,hits=rules.filter(r=>ruleMatch(r,w,true)).map(r=>({r,a:r.amount})).filter(h=>h.a);
+    const amt=base+hits.reduce((a,h)=>a+h.a,0);
+    if(!amt)continue;
+    items.push({kind:'work',auto:true,id:w.id,date:w.date,sort:w.date+(w.time||'99'),label:w.title||typeOf(w.type).label,sub:typeOf(w.type).label+extra(base,hits),amount:amt,counted:true,hits:hits.map(h=>h.r.id)});
   }
   for(const e of (b.entries||[])){
     if(!parseYmd(e.date))continue;
@@ -795,6 +873,7 @@ function renderBank(){
   rf.querySelectorAll('input,select,button').forEach(el=>el.disabled=!ed);
   $('#bkEntryForm').querySelectorAll('input,select,button').forEach(el=>el.disabled=!ed);
   if(!$('#bk_e_date').value)$('#bk_e_date').value=ymd(new Date());
+  renderRules(items,ed);
 }
 function saveBank(patch){
   const next={...cfg(),...patch};bank=next;renderBank();renderWeek();
@@ -875,6 +954,73 @@ $('#evTagForm').addEventListener('submit',async e=>{
   try{apply(await run('importAll',{streams:S,works:W,bank:null},'merge'));err.textContent='';$('#ev_kw').value='';toast(`配信${S.length}件・歌みた／出演${W.length}件を「${name}」にまとめました`)}
   catch(x){err.textContent=errMsg(x)}finally{btn.disabled=false}
 });
+// ---------- 追加ルール ----------
+let editingRule=null;
+$('#bx_kind').innerHTML=`<optgroup label="配信">${RULE_KINDS.filter(k=>k.target==='stream').map(k=>`<option value="${k.id}">${k.label}</option>`).join('')}</optgroup><optgroup label="歌みた・ライブ">${RULE_KINDS.filter(k=>k.target==='work').map(k=>`<option value="${k.id}">${k.label}</option>`).join('')}</optgroup>`;
+function drawRuleVal(r){
+  const k=kindOf($('#bx_kind').value),box=$('#bx_val');r=r||{};
+  if(k.val==='cat')box.innerHTML=`<label class="f">配信内容<select id="bx_v">${CATS.map(c=>`<option value="${c.id}">${c.label}</option>`).join('')}</select></label>`;
+  else if(k.val==='type')box.innerHTML=`<label class="f">種類<select id="bx_v">${TYPES.map(t=>`<option value="${t.id}">${t.label}</option>`).join('')}</select></label>`;
+  else if(k.val==='text')box.innerHTML=`<label class="f">${k.vl}<input type="text" id="bx_v" placeholder="${esc(k.ph)}"></label>`;
+  else if(k.val==='num')box.innerHTML=`<label class="f">${k.vl}<input type="number" id="bx_v" min="0.5" step="0.5" inputmode="decimal" placeholder="${esc(k.ph)}"></label>`;
+  else if(k.val==='time')box.innerHTML=`<div class="timepair"><label class="f">この時刻から<input type="time" id="bx_from" value="00:00"></label><span>〜</span><label class="f">この時刻まで<input type="time" id="bx_to" value="05:00"></label></div><p class="hint" style="margin-top:4px">開始時刻で判定します。22:00〜02:00 のように日付をまたぐ範囲も指定できます。</p>`;
+  else box.innerHTML='';
+  box.hidden=!box.innerHTML;
+  if($('#bx_v')&&r.value!=null)$('#bx_v').value=r.value;
+  if(r.from&&$('#bx_from'))$('#bx_from').value=r.from;
+  if(r.to&&$('#bx_to'))$('#bx_to').value=r.to;
+  const work=k.target==='work';$('#bx_unit').disabled=work;if(work)$('#bx_unit').value='each';
+}
+$('#bx_kind').addEventListener('change',()=>drawRuleVal());
+drawRuleVal();
+function renderRules(items,ed){
+  const b=cfg(),rules=b.rules||[];
+  $('#bkRules').innerHTML=rules.length?rules.map(r=>{
+    const n=items.filter(x=>x.counted&&(x.hits||[]).includes(r.id)).length;
+    return `<div class="rule ${r.on===false?'off':''}"><input type="checkbox" data-rtoggle="${esc(r.id)}" ${r.on===false?'':'checked'} ${ed?'':'disabled'} aria-label="このルールを使う"><span class="rn">${esc(r.name||ruleDesc(r))}<small>${esc(r.name?ruleDesc(r):'')}${r.name?'・':''}これまで${n}回</small></span><span class="ra">+${yen(r.amount)}${r.unit==='hour'?'<small style="font-weight:400;color:var(--muted)">/時間</small>':''}</span><span class="rb">${ed?`<button type="button" data-redit="${esc(r.id)}">編集</button><button type="button" class="del" data-rdel="${esc(r.id)}">削除</button>`:''}</span></div>`;
+  }).join(''):'<p class="empty-note">「深夜の配信は＋200円」「○○さんとのコラボは＋300円」のように、条件つきの上乗せを好きなだけ足せます。</p>';
+  $('#bkXForm').querySelectorAll('input,select,button').forEach(el=>el.disabled=!ed);
+  if(ed&&kindOf($('#bx_kind').value).target==='work')$('#bx_unit').disabled=true;
+}
+function resetRuleForm(){editingRule=null;$('#bx_amt').value='';$('#bx_name').value='';$('#bx_err').textContent='';$('#bx_save').textContent='ルールを追加';$('#bx_cancel').hidden=true;drawRuleVal()}
+$('#bx_cancel').onclick=resetRuleForm;
+$('#bkXForm').addEventListener('submit',async e=>{
+  e.preventDefault();if(!bankRef)return;
+  const kind=$('#bx_kind').value,k=kindOf(kind),err=$('#bx_err');
+  const amt=numVal('#bx_amt',1);
+  const r={id:editingRule||newId(),kind,amount:amt,unit:k.target==='work'?'each':$('#bx_unit').value,name:$('#bx_name').value.trim(),on:true};
+  if(k.val==='cat'||k.val==='type')r.value=$('#bx_v').value;
+  if(k.val==='text'){r.value=$('#bx_v').value.trim();if(!r.value){err.textContent='条件の言葉・名前を入れてください。';return}}
+  if(k.val==='num'){const h=Number($('#bx_v').value);if(!(h>0)){err.textContent='何時間以上かを数字で入れてください。';return}r.value=h}
+  if(k.val==='time'){r.from=$('#bx_from').value;r.to=$('#bx_to').value;if(!r.from||!r.to||r.from===r.to){err.textContent='開始と終了に、違う時刻を入れてください。';return}}
+  if(amt==null){err.textContent='金額は1円以上の数字で入れてください。';return}
+  err.textContent='';
+  const cur=cfg().rules||[],was=cur.find(x=>x.id===r.id);
+  if(was)r.on=was.on;
+  const next=was?cur.map(x=>x.id===r.id?r:x):[...cur,r];
+  try{await saveBank({rules:next});
+    if(!(cfg().rules||[]).some(x=>x.id===r.id)){err.textContent='保存先のスプレッドシートに追加ルールが残りませんでした。Apps Script 側の貯金の保存が、決まった項目だけを書き込む作りになっている可能性があります。';return}
+    toast(was?'ルールを更新しました':'ルールを追加しました');resetRuleForm()}catch(_){}
+});
+$('#bkRules').addEventListener('change',e=>{
+  const c=e.target.closest('[data-rtoggle]');if(!c||!bankRef)return;
+  saveBank({rules:(cfg().rules||[]).map(r=>r.id===c.dataset.rtoggle?{...r,on:c.checked}:r)}).catch(()=>{});
+});
+$('#bkRules').addEventListener('click',e=>{
+  const ed=e.target.closest('[data-redit]');
+  if(ed){
+    const r=(cfg().rules||[]).find(x=>x.id===ed.dataset.redit);if(!r)return;
+    editingRule=r.id;$('#bx_kind').value=r.kind;drawRuleVal(r);
+    $('#bx_amt').value=r.amount;$('#bx_unit').value=r.unit||'each';$('#bx_name').value=r.name||'';
+    $('#bx_save').textContent='ルールを更新';$('#bx_cancel').hidden=false;$('#bx_err').textContent='';
+    $('#bx_kind').scrollIntoView({block:'center'});return;
+  }
+  const d=e.target.closest('[data-rdel]');if(!d||!bankRef)return;
+  if(!d.dataset.armed){d.dataset.armed='1';d.textContent='削除？';return}
+  if(editingRule===d.dataset.rdel)resetRuleForm();
+  saveBank({rules:(cfg().rules||[]).filter(r=>r.id!==d.dataset.rdel)}).then(()=>toast('ルールを削除しました')).catch(()=>{});
+});
+
 function renderAll(){renderMonth();renderWeek();renderInsights();renderList();renderWorks();renderEvents();renderBank()}
 
 // ---------- dialogs ----------
